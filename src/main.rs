@@ -20,7 +20,7 @@ pub trait Manager {
     fn info(&self);
 
     /// Validate a command from the cli
-    fn validate(&self, command: &str, args: Vec<String>);
+    fn validate(&self, args: Vec<String>);
 
     /// List all the available node versions (and display which installed)
     fn list(&self);
@@ -44,8 +44,8 @@ impl Manager for Coordinator {
         println!("Path: {} \nInstalled: {:?}", self.path, self.installed);
     }
 
-    fn validate(&self, command: &str, args: Vec<String>) {
-        match command {
+    fn validate(&self, args: Vec<String>) {
+        match &*args[0] {
             "add" => {
                 assert!(
                     args.len() == 2,
@@ -91,7 +91,7 @@ fn main() {
         installed: vec![],
     };
 
-    coordinator.validate(&*args[0].to_owned(), args.to_owned());
+    coordinator.validate(args.to_owned());
 
     match &*args[0] {
         "info" => coordinator.info(),
