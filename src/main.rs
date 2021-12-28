@@ -4,6 +4,7 @@
 //! Installs everything at "$HOME/.config/noot/" and this is not changable
 
 use std::env;
+use std::env::consts::ARCH;
 
 /// Main command runner
 struct Coordinator {
@@ -12,6 +13,14 @@ struct Coordinator {
 
     /// Which versions are installed
     pub installed: Vec<String>,
+
+    /// Remote url to fetch the node versions from
+    pub remote: String,
+
+    /// OS architecture required for installing the correct version
+    /// Supported:
+    ///     - darwin-arm64
+    pub architecture: String,
 }
 
 /// Main command runner functionality
@@ -70,7 +79,10 @@ impl Manager for Coordinator {
     }
 
     fn add(&self, version: String) {
-        println!("Add: {}", version);
+        println!(
+            "Add: {}\nFrom: {}\nArch: {}",
+            version, self.remote, self.architecture
+        );
     }
 
     fn set(&self, version: String) {
@@ -86,9 +98,17 @@ impl Manager for Coordinator {
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
+    // Must match one of these architectures
+    let arch = match ARCH {
+        "aarch64" => "darwin-arm64",
+        _ => panic!("UNSUPPORTED ARCHITECTURE"),
+    };
+
     let coordinator = Coordinator {
         path: "~/.config/noot".to_owned(),
         installed: vec![],
+        remote: "https://nodejs.org/dist/".to_owned(),
+        architecture: arch.to_owned(),
     };
 
     coordinator.validate(args.to_owned());
