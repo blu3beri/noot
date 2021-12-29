@@ -3,8 +3,15 @@
 //!
 //! Installs everything at "$HOME/.config/noot/" and this is not changable
 
+use async_trait::async_trait;
+use flate2::bufread::GzDecoder;
+use fs_extra::dir;
 use std::env;
 use std::env::consts::ARCH;
+use std::fs::create_dir;
+use std::io::Cursor;
+use std::path::Path;
+use tar::Archive;
 
 /// Main command runner
 struct Coordinator {
@@ -24,6 +31,7 @@ struct Coordinator {
 }
 
 /// Main command runner functionality
+#[async_trait]
 pub trait Manager {
     /// Log info about the command runner
     fn info(&self);
@@ -32,13 +40,13 @@ pub trait Manager {
     fn validate(&self, args: Vec<String>);
 
     /// List all the available node versions (and display which installed)
-    fn list(&self);
+    async fn list(&self);
 
     /// Add a node version (DOES NOT SET IT)
-    fn add(&self, version: String);
+    async fn add(&self, version: String);
 
     /// Set a node version (DOES NOT INSTALL IT)
-    fn set(&self, version: String);
+    async fn set(&self, version: String);
 
     /// Removes a node version
     /// TODO: How to handle removal of set node version?
@@ -48,6 +56,7 @@ pub trait Manager {
     fn remove(&self, version: String);
 }
 
+#[async_trait]
 impl Manager for Coordinator {
     fn info(&self) {
         println!("Path: {} \nInstalled: {:?}", self.path, self.installed);
@@ -70,23 +79,52 @@ impl Manager for Coordinator {
                     "Please supply 1 and only 1 version to remove"
                 );
             }
-            _ => panic!("USAGE: <INFO | ADD | SET | LIST | REMOVE>"),
+            "rc" => {}
+            _ => panic!("USAGE: <RC | INFO | ADD | SET | LIST | REMOVE>"),
         }
     }
 
-    fn list(&self) {
+    async fn list(&self) {
         println!("List");
     }
 
-    fn add(&self, version: String) {
-        println!(
-            "Add: {}\nFrom: {}\nArch: {}",
-            version, self.remote, self.architecture
+    // TODO: Add statusbar to downloading and unpacking
+    async fn add(&self, version: String) {
+        let url = format!(
+            "{}v{}/node-v{}-{}.tar.gz",
+            &self.remote, &version, &version, &self.architecture
         );
+
+        println!("Downloading node version: {}", version);
+        let res = reqwest::get(url).await.unwrap();
+        let bytes = res.bytes().await.unwrap();
+        let content = Cursor::new(bytes);
+        let tar = GzDecoder::new(content);
+        let mut archive = Archive::new(tar);
+
+        println!("Unpacking...");
+        archive.unpack(&self.path).unwrap();
     }
 
-    fn set(&self, version: String) {
-        println!("Set: {}", version);
+    async fn set(&self, version: String) {
+        let using_path = format!("{}using", &self.path);
+        let node_path = format!("{}node-v{}-{}", &self.path, &version, &self.architecture);
+        let does_path_exist = Path::exists(Path::new(&node_path));
+
+        if !does_path_exist {
+            panic!("PATH DOES NOT EXIST");
+        }
+
+        let mut options = dir::CopyOptions::new();
+        options.overwrite = true;
+        options.content_only = true;
+
+        // TODO: remove fs_extra
+        //       loop over all binaries to symlink
+        let p1 = format!("{}/bin/npm", node_path);
+        let p2 = format!("{}/npm", using_path);
+
+        std::os::unix::fs::symlink(p1, p2).unwrap();
     }
 
     fn remove(&self, version: String) {
@@ -95,8 +133,10 @@ impl Manager for Coordinator {
 }
 
 /// CLI entrypoint
-fn main() {
+#[tokio::main]
+async fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
+    // https://nodejs.org/dist/v16.11.0/node-v16.11.0-darwin-arm64.tar.gz
 
     // Must match one of these architectures
     let arch = match ARCH {
@@ -104,8 +144,12 @@ fn main() {
         _ => panic!("UNSUPPORTED ARCHITECTURE"),
     };
 
+    let home = env::var("HOME").unwrap();
+    let path = format!("{}/.config/noot/", home);
+    let _ = create_dir(&path);
+    let _ = create_dir(format!("{}{}", &path, "using"));
     let coordinator = Coordinator {
-        path: "~/.config/noot".to_owned(),
+        path,
         installed: vec![],
         remote: "https://nodejs.org/dist/".to_owned(),
         architecture: arch.to_owned(),
@@ -114,11 +158,16 @@ fn main() {
     coordinator.validate(args.to_owned());
 
     match &*args[0] {
+        "rc" => {
+            println!("echo 'export node=~/.config/noot/using/node' >> ~/.zshrc");
+            println!("echo 'export npm=~/.config/noot/using/npm'   >> ~/.zshrc");
+            println!("echo 'export npx=~/.config/noot/using/npx'   >> ~/.zshrc");
+        }
         "info" => coordinator.info(),
-        "add" => coordinator.add(args[1].to_owned()),
-        "set" => coordinator.set(args[1].to_owned()),
+        "list" => coordinator.list().await,
+        "add" => coordinator.add(args[1].to_owned()).await,
+        "set" => coordinator.set(args[1].to_owned()).await,
         "remove" => coordinator.remove(args[1].to_owned()),
-        "list" => coordinator.list(),
-        _ => panic!("USAGE: <INFO | ADD | SET | LIST | REMOVE>"),
+        _ => panic!("USAGE: <RC | INFO | ADD | SET | LIST | REMOVE>"),
     }
 }
