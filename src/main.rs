@@ -72,15 +72,22 @@ impl Manager for Coordinator {
             }
             "set" => {
                 assert!(args.len() == 2, "Please supply 1 and only 1 version to set");
+
+                let node_path = format!("{}node-v{}-{}", &self.path, &args[1], &self.architecture);
+                let does_path_exist = Path::exists(Path::new(&node_path));
+                assert!(does_path_exist, "Node version does not exist");
             }
             "remove" => {
                 assert!(
                     args.len() == 2,
                     "Please supply 1 and only 1 version to remove"
                 );
+                let node_path = format!("{}node-v{}-{}", &self.path, &args[1], &self.architecture);
+                let does_path_exist = Path::exists(Path::new(&node_path));
+                assert!(does_path_exist, "Node version does not exist");
             }
             "rc" => {}
-            _ => panic!("USAGE: <RC | INFO | ADD | SET | LIST | REMOVE>"),
+            _ => panic!("USAGE: <INFO | ADD | SET | LIST | REMOVE>"),
         }
     }
 
@@ -110,11 +117,6 @@ impl Manager for Coordinator {
         let bins = vec!["node", "npm", "npx"];
         let using_path = format!("{}using", &self.path);
         let node_path = format!("{}node-v{}-{}", &self.path, &version, &self.architecture);
-        let does_path_exist = Path::exists(Path::new(&node_path));
-
-        if !does_path_exist {
-            panic!("PATH DOES NOT EXIST");
-        }
 
         let mut options = dir::CopyOptions::new();
         options.overwrite = true;
@@ -129,13 +131,9 @@ impl Manager for Coordinator {
 
     fn remove(&self, version: String) {
         let node_path = format!("{}node-v{}-{}", &self.path, &version, &self.architecture);
-        let does_path_exist = Path::exists(Path::new(&node_path));
-        if !does_path_exist {
-            eprintln!("{} does not exist here. \n {}", version, node_path);
-        }
         match fs::remove_dir_all(node_path) {
             Ok(_) => println!("removed: {}", version),
-            Err(_) => eprintln!("Could not delete: {}", version),
+            Err(_) => println!("Could not delete: {}", version),
         }
     }
 }
@@ -149,7 +147,7 @@ async fn main() {
     // Must match one of these architectures
     let arch = match ARCH {
         "aarch64" => "darwin-arm64",
-        _ => panic!("UNSUPPORTED ARCHITECTURE"),
+        _ => panic!("{}: UNSUPPORTED ARCHITECTURE", ARCH),
     };
 
     let home = env::var("HOME").unwrap();
@@ -166,11 +164,6 @@ async fn main() {
     coordinator.validate(args.to_owned());
 
     match &*args[0] {
-        "rc" => {
-            println!("echo 'export node=~/.config/noot/using/node' >> ~/.zshrc");
-            println!("echo 'export npm=~/.config/noot/using/npm'   >> ~/.zshrc");
-            println!("echo 'export npx=~/.config/noot/using/npx'   >> ~/.zshrc");
-        }
         "info" => coordinator.info(),
         "list" => coordinator.list().await,
         "add" => coordinator.add(args[1].to_owned()).await,
