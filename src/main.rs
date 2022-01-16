@@ -1,16 +1,16 @@
 //! The simplest stupidest node version manager that is very opinionated. It is used as a personal
 //! project and therefore might not fit your use case.
 //!
-//! Installs everything at "$HOME/.config/noot/" and this is not changable
+//! Installs everything at "$HOME/.config/noot/" and this is not configurable
 
 use async_trait::async_trait;
 use flate2::bufread::GzDecoder;
 use fs_extra::dir;
-use std::env;
 use std::env::consts::ARCH;
 use std::fs::create_dir;
 use std::io::Cursor;
 use std::path::Path;
+use std::{env, fs};
 use tar::Archive;
 
 /// Main command runner
@@ -26,7 +26,7 @@ struct Coordinator {
 
     /// OS architecture required for installing the correct version
     /// Supported:
-    ///     - darwin-arm64
+    ///   - darwin-arm64
     pub architecture: String,
 }
 
@@ -107,6 +107,7 @@ impl Manager for Coordinator {
     }
 
     async fn set(&self, version: String) {
+        let bins = vec!["node", "npm", "npx"];
         let using_path = format!("{}using", &self.path);
         let node_path = format!("{}node-v{}-{}", &self.path, &version, &self.architecture);
         let does_path_exist = Path::exists(Path::new(&node_path));
@@ -119,16 +120,23 @@ impl Manager for Coordinator {
         options.overwrite = true;
         options.content_only = true;
 
-        // TODO: remove fs_extra
-        //       loop over all binaries to symlink
-        let p1 = format!("{}/bin/npm", node_path);
-        let p2 = format!("{}/npm", using_path);
-
-        std::os::unix::fs::symlink(p1, p2).unwrap();
+        bins.iter().for_each(|x| {
+            let p1 = format!("{}/bin/{}", node_path, x);
+            let p2 = format!("{}/{}", using_path, x);
+            let _ = std::os::unix::fs::symlink(p1, p2);
+        })
     }
 
     fn remove(&self, version: String) {
-        println!("Remove: {}", version);
+        let node_path = format!("{}node-v{}-{}", &self.path, &version, &self.architecture);
+        let does_path_exist = Path::exists(Path::new(&node_path));
+        if !does_path_exist {
+            eprintln!("{} does not exist here. \n {}", version, node_path);
+        }
+        match fs::remove_dir_all(node_path) {
+            Ok(_) => println!("removed: {}", version),
+            Err(_) => eprintln!("Could not delete: {}", version),
+        }
     }
 }
 
