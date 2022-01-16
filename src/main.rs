@@ -6,9 +6,11 @@
 use async_trait::async_trait;
 use flate2::bufread::GzDecoder;
 use fs_extra::dir;
+use regex::Regex;
 use std::env::consts::ARCH;
-use std::fs::create_dir;
+use std::fs::{create_dir, remove_file};
 use std::io::Cursor;
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::{env, fs};
 use tar::Archive;
@@ -39,9 +41,6 @@ pub trait Manager {
     /// Validate a command from the cli
     fn validate(&self, args: Vec<String>);
 
-    /// List all the available node versions (and display which installed)
-    async fn list(&self);
-
     /// Add a node version (DOES NOT SET IT)
     async fn add(&self, version: String);
 
@@ -49,17 +48,16 @@ pub trait Manager {
     async fn set(&self, version: String);
 
     /// Removes a node version
-    /// TODO: How to handle removal of set node version?
-    ///       We could panic and make it impossible
-    ///       or even better, set the latest version when the
-    ///       set version is deleted
     fn remove(&self, version: String);
 }
 
 #[async_trait]
 impl Manager for Coordinator {
     fn info(&self) {
-        println!("Path: {} \nInstalled: {:?}", self.path, self.installed);
+        println!("Path: {}", self.path);
+        self.installed
+            .iter()
+            .for_each(|x| println!("  - {}", x.split('-').collect::<Vec<_>>()[1]))
     }
 
     fn validate(&self, args: Vec<String>) {
@@ -67,11 +65,14 @@ impl Manager for Coordinator {
             "add" => {
                 assert!(
                     args.len() == 2,
-                    "Please supply 1 and only 1 version to install"
+                    "Add subcommand takes a node version as argument"
                 );
             }
             "set" => {
-                assert!(args.len() == 2, "Please supply 1 and only 1 version to set");
+                assert!(
+                    args.len() == 2,
+                    "Set subcommand takes a node version as argument"
+                );
 
                 let node_path = format!("{}node-v{}-{}", &self.path, &args[1], &self.architecture);
                 let does_path_exist = Path::exists(Path::new(&node_path));
@@ -80,19 +81,18 @@ impl Manager for Coordinator {
             "remove" => {
                 assert!(
                     args.len() == 2,
-                    "Please supply 1 and only 1 version to remove"
+                    "Remove subcommand takes a node version as argument"
                 );
                 let node_path = format!("{}node-v{}-{}", &self.path, &args[1], &self.architecture);
                 let does_path_exist = Path::exists(Path::new(&node_path));
                 assert!(does_path_exist, "Node version does not exist");
             }
-            "rc" => {}
-            _ => panic!("USAGE: <INFO | ADD | SET | LIST | REMOVE>"),
+            "info" => assert!(
+                args.len() == 1,
+                "Info subcommand does not take any arguments"
+            ),
+            _ => panic!("USAGE: <ADD | SET | REMOVE>"),
         }
-    }
-
-    async fn list(&self) {
-        println!("List");
     }
 
     // TODO: Add statusbar to downloading and unpacking
@@ -125,7 +125,8 @@ impl Manager for Coordinator {
         bins.iter().for_each(|x| {
             let p1 = format!("{}/bin/{}", node_path, x);
             let p2 = format!("{}/{}", using_path, x);
-            let _ = std::os::unix::fs::symlink(p1, p2);
+            let _ = remove_file(&p2);
+            let _ = symlink(p1, p2);
         })
     }
 
@@ -141,6 +142,7 @@ impl Manager for Coordinator {
 /// CLI entrypoint
 #[tokio::main]
 async fn main() {
+    assert!(env::args().len() > 1, "USAGE: <ADD | SET | REMOVE | INFO>");
     let args: Vec<String> = env::args().skip(1).collect();
     // https://nodejs.org/dist/v16.11.0/node-v16.11.0-darwin-arm64.tar.gz
 
@@ -152,11 +154,20 @@ async fn main() {
 
     let home = env::var("HOME").unwrap();
     let path = format!("{}/.config/noot/", home);
+    let installed: Vec<_> = fs::read_dir(&path)
+        .unwrap()
+        .map(|x| x.unwrap().file_name().to_str().unwrap().to_owned())
+        .filter(|x| {
+            let re = Regex::new(r"^node-v").unwrap();
+            re.is_match(x)
+        })
+        .collect();
+
     let _ = create_dir(&path);
     let _ = create_dir(format!("{}{}", &path, "using"));
     let coordinator = Coordinator {
         path,
-        installed: vec![],
+        installed,
         remote: "https://nodejs.org/dist/".to_owned(),
         architecture: arch.to_owned(),
     };
@@ -165,10 +176,9 @@ async fn main() {
 
     match &*args[0] {
         "info" => coordinator.info(),
-        "list" => coordinator.list().await,
         "add" => coordinator.add(args[1].to_owned()).await,
         "set" => coordinator.set(args[1].to_owned()).await,
         "remove" => coordinator.remove(args[1].to_owned()),
-        _ => panic!("USAGE: <RC | INFO | ADD | SET | LIST | REMOVE>"),
+        _ => panic!("USAGE: <ADD | SET | REMOVE | INFO>"),
     }
 }
