@@ -3,7 +3,7 @@ Noot
 Node version manager.
 
 allows
+ - info (lists local versions and where node versions are installed)
  - set (sets a downloaded node version)
  - add (downloads a new node version)
  - remove (removes a downloaded node version)
- - list (lists remote and local node versions) TODO
